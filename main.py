@@ -1,38 +1,3 @@
-'''
-你现在是一个 资深Python开发专家，请你帮我完成以下任务：
-
-【🔧 任务描述】
-每天我要写日报，请协助我完成。每周需要输出周报，请基于日报内容完成周报。
-日报格式举例如下：
-“
-（一）今日进展
-1. xxx。
-（二）明日计划
-1.xxx。
-”
-周报格式举例如下：
-“
-（一）本周进展
-1. xxx
-（二）下周计划
-1. xxx
-”
-
-【🧾 使用说明】
-- 每天我运行main.py时候，引导我录入今日进展和明日计划。录入后调用deepseek api优化我的描述并按照日报格式输出。同时将我的原文和优化后的原文保存到sqlite数据库中。
-- 每周五，完成上述每天日志录入和输出后，自动调用deepseek api根据这周5天的日报内容生成周报，并按照周报格式输出。同时将周报保存到sqlite数据库中。
-
-【🎯 输出预期】
-- 输出完成上述任务的main.py
-- 输出格式：纯文本
-
-【📌 特殊要求】
-- 支持deepseek和豆包的api调用
-
-【💬 响应风格】
-- 只返回代码不解释
-'''
-
 import sqlite3
 import datetime
 import os
@@ -180,7 +145,62 @@ def generate_weekly_report():
     conn.commit()
     conn.close()
 
-# ========== 生成日报（GUI 版本） ==========
+# ========== 根据最近日报推测今日进展和明日计划 ==========
+def predict_today_and_tomorrow():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    today_date = datetime.date.today().isoformat()
+
+    # 增加日期条件，确保只查询今天之前的日志
+    cursor.execute('''
+        SELECT date, optimized_today, optimized_tomorrow
+        FROM daily_logs
+        WHERE date < ?
+        ORDER BY date DESC
+        LIMIT 3
+    ''', (today_date,))
+
+    rows = cursor.fetchall()  # 格式为 [(date1, today1, tomorrow1), (date2, today2, tomorrow2), ...]
+    conn.close()
+
+    if not rows:
+        return "", ""  # 如果没有数据，返回空字符串
+
+    # 拼接最近几天的日报内容，生成推测的 prompt
+    recent_summaries = ""
+    for row_date, row_today, row_tomorrow in rows:
+        today_content = row_today or "（无内容）"
+        tomorrow_content = row_tomorrow or "（无内容）"
+        recent_summaries += f"日期：{row_date}\n今日进展：{today_content}\n明日计划：{tomorrow_content}\n\n"
+
+    # 改进 Prompt，优先参考昨天的明日计划
+    prompt = f"""
+以下是最近几天的日报内容，包括日期。请根据这些内容推测今天的'今日进展'和'明日计划'。请确保：
+1. '今日进展'优先参考昨天的'明日计划'，总结出今天的主要工作内容和可能完成的任务。
+2. '明日计划'基于今日进展推测合理的下一步操作，尽量具体化。例如：
+   - 如果是研究任务，列出研究的具体步骤。
+   - 如果是测试任务，列出可能的测试目标或结果。
+   - 如果是长期任务，列出可能的阶段性成果。
+
+日报内容如下：
+{recent_summaries}
+
+请输出如下格式：
+“（一）今日进展
+1. xxx。
+（二）明日计划
+1. xxx。”
+"""
+
+    try:
+        prediction = call_llm(prompt)
+        predicted_today, predicted_tomorrow = extract_sections(prediction)
+        return predicted_today, predicted_tomorrow
+    except Exception as e:
+        print(f"⚠️ 推测今日进展和明日计划时发生错误：{e}")
+        return "", ""
+
+# ========== 生成日报（GUI 版本，集成推测功能） ==========
 def generate_daily_report_gui():
     today = datetime.date.today().isoformat()
     # 检查当天是否有记录
@@ -193,6 +213,14 @@ def generate_daily_report_gui():
     ''', (today,))
     row = cursor.fetchone()
     conn.close()
+
+    print("[DBG] 当天记录：", row)  # 调试输出
+
+    # 如果没有当天记录，尝试推测内容
+    predicted_today, predicted_tomorrow = ("", "")
+    if not row:
+        predicted_today, predicted_tomorrow = predict_today_and_tomorrow()
+        print(f"[DBG] 推测的今日进展：{predicted_today}")  # 调试输出
 
     def optimize():
         original_today = today_input.get("1.0", tk.END).strip()
@@ -264,12 +292,16 @@ def generate_daily_report_gui():
     today_input = tk.Text(left_frame, height=10, width=input_width)
     if row:
         today_input.insert(tk.END, row[0])
+    elif predicted_today:
+        today_input.insert(tk.END, predicted_today)
     today_input.pack()
 
     tk.Label(left_frame, text="明日计划：").pack()
     tomorrow_input = tk.Text(left_frame, height=10, width=input_width)
     if row:
         tomorrow_input.insert(tk.END, row[1])
+    elif predicted_tomorrow:
+        tomorrow_input.insert(tk.END, predicted_tomorrow)
     tomorrow_input.pack()
 
     # 中间提示信息和按钮区域
