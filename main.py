@@ -1,3 +1,38 @@
+'''
+你现在是一个 资深Python开发专家，请你帮我完成以下任务：
+
+【🔧 任务描述】
+每天我要写日报，请协助我完成。每周需要输出周报，请基于日报内容完成周报。
+日报格式举例如下：
+“
+（一）今日进展
+1. xxx。
+（二）明日计划
+1.xxx。
+”
+周报格式举例如下：
+“
+（一）本周进展
+1. xxx
+（二）下周计划
+1. xxx
+”
+
+【🧾 使用说明】
+- 每天我运行main.py时候，引导我录入今日进展和明日计划。录入后调用deepseek api优化我的描述并按照日报格式输出。同时将我的原文和优化后的原文保存到sqlite数据库中。
+- 每周五，完成上述每天日志录入和输出后，自动调用deepseek api根据这周5天的日报内容生成周报，并按照周报格式输出。同时将周报保存到sqlite数据库中。
+
+【🎯 输出预期】
+- 输出完成上述任务的main.py
+- 输出格式：纯文本
+
+【📌 特殊要求】
+- 支持deepseek和豆包的api调用
+
+【💬 响应风格】
+- 只返回代码不解释
+'''
+
 import sqlite3
 import datetime
 import os
@@ -147,8 +182,19 @@ def generate_weekly_report():
 
 # ========== 生成日报（GUI 版本） ==========
 def generate_daily_report_gui():
+    today = datetime.date.today().isoformat()
+    # 检查当天是否有记录
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT original_today, original_tomorrow, optimized_raw, optimized_today, optimized_tomorrow
+        FROM daily_logs
+        WHERE date = ?
+    ''', (today,))
+    row = cursor.fetchone()
+    conn.close()
+
     def optimize():
-        today = datetime.date.today().isoformat()
         original_today = today_input.get("1.0", tk.END).strip()
         original_tomorrow = tomorrow_input.get("1.0", tk.END).strip()
 
@@ -172,21 +218,32 @@ def generate_daily_report_gui():
             messagebox.showerror("错误", f"发生错误：{str(e)}")
 
     def save():
-        today = datetime.date.today().isoformat()
         original_today = today_input.get("1.0", tk.END).strip()
         original_tomorrow = tomorrow_input.get("1.0", tk.END).strip()
         optimized_today = optimized_today_output.get("1.0", tk.END).strip()
         optimized_tomorrow = optimized_tomorrow_output.get("1.0", tk.END).strip()
         optimized_raw = f"（一）今日进展\n{optimized_today}\n（二）明日计划\n{optimized_tomorrow}"
 
-        save_daily_log(
-            today,
-            original_today,
-            original_tomorrow,
-            optimized_raw,
-            optimized_today,
-            optimized_tomorrow
-        )
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        if row:
+            # 如果当天已有记录，则更新
+            cursor.execute('''
+                UPDATE daily_logs
+                SET original_today = ?, original_tomorrow = ?,
+                    optimized_raw = ?, optimized_today = ?, optimized_tomorrow = ?
+                WHERE date = ?
+            ''', (original_today, original_tomorrow, optimized_raw, optimized_today, optimized_tomorrow, today))
+        else:
+            # 如果当天没有记录，则插入
+            cursor.execute('''
+                INSERT INTO daily_logs (
+                    date, original_today, original_tomorrow,
+                    optimized_raw, optimized_today, optimized_tomorrow
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            ''', (today, original_today, original_tomorrow, optimized_raw, optimized_today, optimized_tomorrow))
+        conn.commit()
+        conn.close()
 
         messagebox.showinfo("保存成功", "日报已成功保存到数据库。")
         if datetime.date.today().weekday() == 4:
@@ -205,10 +262,14 @@ def generate_daily_report_gui():
 
     tk.Label(left_frame, text="今日进展：").pack()
     today_input = tk.Text(left_frame, height=10, width=input_width)
+    if row:
+        today_input.insert(tk.END, row[0])
     today_input.pack()
 
     tk.Label(left_frame, text="明日计划：").pack()
     tomorrow_input = tk.Text(left_frame, height=10, width=input_width)
+    if row:
+        tomorrow_input.insert(tk.END, row[1])
     tomorrow_input.pack()
 
     # 中间提示信息和按钮区域
@@ -231,10 +292,20 @@ def generate_daily_report_gui():
 
     tk.Label(right_frame, text="优化后的今日进展：").pack()
     optimized_today_output = tk.Text(right_frame, height=10, width=input_width)
+    if row:
+        if row[3]:
+            optimized_today_output.insert(tk.END, row[3])
+        elif row[2]:
+            optimized_today_output.insert(tk.END, extract_sections(row[2])[0])
     optimized_today_output.pack()
 
     tk.Label(right_frame, text="优化后的明日计划：").pack()
     optimized_tomorrow_output = tk.Text(right_frame, height=10, width=input_width)
+    if row:
+        if row[4]:
+            optimized_tomorrow_output.insert(tk.END, row[4])
+        elif row[2]:
+            optimized_tomorrow_output.insert(tk.END, extract_sections(row[2])[1])
     optimized_tomorrow_output.pack()
 
     root.mainloop()
