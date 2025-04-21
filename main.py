@@ -3,6 +3,8 @@ import datetime
 import os
 import openai
 import requests
+import tkinter as tk
+from tkinter import messagebox
 
 # ========== 配置部分 ==========
 DEEPSEEK_API_KEY = "sk-xxxxxxxxxxxxxxxxxxx"
@@ -89,31 +91,6 @@ def save_daily_log(date, original_today, original_tomorrow, optimized_raw, optim
     conn.commit()
     conn.close()
 
-# ========== 生成日报 ==========
-def generate_daily_report():
-    today = datetime.date.today().isoformat()
-    print("请输入今日进展：")
-    original_today = input("1. ")
-    print("请输入明日计划：")
-    original_tomorrow = input("1. ")
-
-    prompt = f"请优化以下内容并输出成如下格式：\n“（一）今日进展\n1. xxx。\n（二）明日计划\n1.xxx。”\n\n今日进展：{original_today}\n明日计划：{original_tomorrow}"
-    optimized_raw = call_llm(prompt)
-
-    optimized_today, optimized_tomorrow = extract_sections(optimized_raw)
-
-    print("\n✅ 优化后的日报内容如下：\n")
-    print(optimized_raw)
-
-    save_daily_log(
-        today,
-        original_today,
-        original_tomorrow,
-        optimized_raw,
-        optimized_today,
-        optimized_tomorrow
-    )
-
 # ========== 获取日报内容优先级 ==========
 def get_final_content(row):
     original_today, original_tomorrow, optimized_raw, optimized_today, optimized_tomorrow = row
@@ -168,11 +145,104 @@ def generate_weekly_report():
     conn.commit()
     conn.close()
 
+# ========== 生成日报（GUI 版本） ==========
+def generate_daily_report_gui():
+    def optimize():
+        today = datetime.date.today().isoformat()
+        original_today = today_input.get("1.0", tk.END).strip()
+        original_tomorrow = tomorrow_input.get("1.0", tk.END).strip()
+
+        prompt = f"请优化以下内容并输出成如下格式：\n“（一）今日进展\n1. xxx。\n（二）明日计划\n1.xxx。”\n\n今日进展：{original_today}\n明日计划：{original_tomorrow}"
+        try:
+            engine_info = "DeepSeek" if USE_DEEPSEEK else "豆包"
+            info_label.config(text=f"{engine_info} 优化中...")
+
+            optimized_raw = call_llm(prompt)
+            optimized_today, optimized_tomorrow = extract_sections(optimized_raw)
+
+            optimized_today_output.delete("1.0", tk.END)
+            optimized_tomorrow_output.delete("1.0", tk.END)
+            optimized_today_output.insert(tk.END, optimized_today)
+            optimized_tomorrow_output.insert(tk.END, optimized_tomorrow)
+
+            # 显示优化引擎信息
+            engine_info = "DeepSeek" if USE_DEEPSEEK else "豆包"
+            info_label.config(text=f"{engine_info} 完成优化")
+        except Exception as e:
+            messagebox.showerror("错误", f"发生错误：{str(e)}")
+
+    def save():
+        today = datetime.date.today().isoformat()
+        original_today = today_input.get("1.0", tk.END).strip()
+        original_tomorrow = tomorrow_input.get("1.0", tk.END).strip()
+        optimized_today = optimized_today_output.get("1.0", tk.END).strip()
+        optimized_tomorrow = optimized_tomorrow_output.get("1.0", tk.END).strip()
+        optimized_raw = f"（一）今日进展\n{optimized_today}\n（二）明日计划\n{optimized_tomorrow}"
+
+        save_daily_log(
+            today,
+            original_today,
+            original_tomorrow,
+            optimized_raw,
+            optimized_today,
+            optimized_tomorrow
+        )
+
+        messagebox.showinfo("保存成功", "日报已成功保存到数据库。")
+        if datetime.date.today().weekday() == 4:
+            generate_weekly_report()
+        root.destroy()
+
+    root = tk.Tk()
+    root.title("日报输入与优化")
+
+    input_width = 60
+    button_width = 15
+
+    # 左边输入区域
+    left_frame = tk.Frame(root)
+    left_frame.pack(side=tk.LEFT, padx=10, pady=10)
+
+    tk.Label(left_frame, text="今日进展：").pack()
+    today_input = tk.Text(left_frame, height=10, width=input_width)
+    today_input.pack()
+
+    tk.Label(left_frame, text="明日计划：").pack()
+    tomorrow_input = tk.Text(left_frame, height=10, width=input_width)
+    tomorrow_input.pack()
+
+    # 中间提示信息和按钮区域
+    middle_frame = tk.Frame(root)
+    middle_frame.pack(side=tk.LEFT, padx=10, pady=10)
+
+    engine_info = "DeepSeek" if USE_DEEPSEEK else "豆包"
+    info_label = tk.Label(middle_frame, text=f"优化引擎：{engine_info}")
+    info_label.pack()
+
+    optimize_button = tk.Button(middle_frame, text="AI 优化", command=optimize, width=button_width)
+    optimize_button.pack(pady=10)
+
+    save_button = tk.Button(middle_frame, text="保存", command=save, width=button_width)
+    save_button.pack()
+
+    # 右边优化输出区域
+    right_frame = tk.Frame(root)
+    right_frame.pack(side=tk.LEFT, padx=10, pady=10)
+
+    tk.Label(right_frame, text="优化后的今日进展：").pack()
+    optimized_today_output = tk.Text(right_frame, height=10, width=input_width)
+    optimized_today_output.pack()
+
+    tk.Label(right_frame, text="优化后的明日计划：").pack()
+    optimized_tomorrow_output = tk.Text(right_frame, height=10, width=input_width)
+    optimized_tomorrow_output.pack()
+
+    root.mainloop()
+
 # ========== 主程序 ==========
 def main():
     init_db()
-    generate_daily_report()
-    generate_weekly_report()
+    generate_daily_report_gui()
 
 if __name__ == "__main__":
     main()
