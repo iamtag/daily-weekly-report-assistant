@@ -277,6 +277,10 @@ def generate_daily_report_gui():
         conn.close()
 
         messagebox.showinfo("保存成功", "日报已成功保存到数据库。")
+        # 同时将optimized_raw复制一份到剪切板
+        root.clipboard_clear()
+        root.clipboard_append(optimized_raw)
+        root.update()
         if datetime.date.today().weekday() == 4:
             generate_weekly_report()
         root.destroy()
@@ -287,8 +291,16 @@ def generate_daily_report_gui():
     input_width = 60
     button_width = 15
 
+    # 主界面分为上下两部分
+    main_frame = tk.Frame(root)
+    main_frame.pack(fill=tk.BOTH, expand=True)
+
+    # 上部：日报输入和优化区域
+    top_frame = tk.Frame(main_frame)
+    top_frame.pack(fill=tk.X)
+
     # 左边输入区域
-    left_frame = tk.Frame(root)
+    left_frame = tk.Frame(top_frame)
     left_frame.pack(side=tk.LEFT, padx=10, pady=10)
 
     tk.Label(left_frame, text="今日进展：").pack()
@@ -308,7 +320,7 @@ def generate_daily_report_gui():
     tomorrow_input.pack()
 
     # 中间提示信息和按钮区域
-    middle_frame = tk.Frame(root)
+    middle_frame = tk.Frame(top_frame)
     middle_frame.pack(side=tk.LEFT, padx=10, pady=10)
 
     engine_info = "DeepSeek" if USE_DEEPSEEK else "豆包"
@@ -322,7 +334,7 @@ def generate_daily_report_gui():
     save_button.pack()
 
     # 右边优化输出区域
-    right_frame = tk.Frame(root)
+    right_frame = tk.Frame(top_frame)
     right_frame.pack(side=tk.LEFT, padx=10, pady=10)
 
     tk.Label(right_frame, text="优化后的今日进展：").pack()
@@ -342,6 +354,33 @@ def generate_daily_report_gui():
         elif row[2]:
             optimized_tomorrow_output.insert(tk.END, extract_sections(row[2])[1])
     optimized_tomorrow_output.pack()
+
+    # 下部：本周周报显示区域
+    bottom_frame = tk.Frame(main_frame)
+    bottom_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    tk.Label(bottom_frame, text="本周周报：").pack()
+    weekly_report_text = tk.Text(bottom_frame, height=24, width=input_width*2)
+    weekly_report_text.pack(fill=tk.BOTH, expand=True)
+
+    # 获取本周周报内容
+    today = datetime.date.today()
+    week_start = today - datetime.timedelta(days=today.weekday())
+    week_end = week_start + datetime.timedelta(days=4)
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT report FROM weekly_reports
+        WHERE week_start = ? AND week_end = ?
+    ''', (week_start.isoformat(), week_end.isoformat()))
+    weekly_report = cursor.fetchone()
+    conn.close()
+
+    if weekly_report:
+        weekly_report_text.insert(tk.END, weekly_report[0])
+    else:
+        weekly_report_text.insert(tk.END, "本周尚未生成周报")
 
     root.mainloop()
 
